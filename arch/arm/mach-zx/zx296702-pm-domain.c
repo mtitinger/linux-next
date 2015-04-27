@@ -175,7 +175,7 @@ static int zx296702_pd_probe(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(zx296702_pm_domains); ++i)
-		pm_genpd_init(zx296702_pm_domains[i], NULL, false);
+		pm_genpd_init_simple(zx296702_pm_domains[i], NULL, false);
 
 	of_genpd_add_provider_onecell(pdev->dev.of_node, genpd_data);
 	return 0;

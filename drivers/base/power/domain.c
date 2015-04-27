@@ -1447,10 +1447,14 @@ static int pm_genpd_default_restore_state(struct device *dev)
  * pm_genpd_init - Initialize a generic I/O PM domain object.
  * @genpd: PM domain object to initialize.
  * @gov: PM domain governor to associate with the domain (may be NULL).
+ * @states: Array of possible low power states when powering off.
+ * @state_count: Number of low power states.
  * @is_off: Initial value of the domain's power_is_off field.
  */
 void pm_genpd_init(struct generic_pm_domain *genpd,
-		   struct dev_power_governor *gov, bool is_off)
+		   struct dev_power_governor *gov,
+		   const struct genpd_power_state *states,
+		   unsigned int state_count, bool is_off)
 {
 	if (IS_ERR_OR_NULL(genpd))
 		return;
@@ -1501,6 +1505,19 @@ void pm_genpd_init(struct generic_pm_domain *genpd,
 	mutex_unlock(&gpd_list_lock);
 }
 EXPORT_SYMBOL_GPL(pm_genpd_init);
+
+/**
+ * pm_genpd_init_simple - Initialize a generic I/O PM domain object.
+ * @genpd: PM domain object to initialize.
+ * @gov: PM domain governor to associate with the domain (may be NULL).
+ * @is_off: Initial value of the domain's power_is_off field.
+ */
+void pm_genpd_init_simple(struct generic_pm_domain *genpd,
+		   struct dev_power_governor *gov, bool is_off)
+{
+	pm_genpd_init(genpd, gov, NULL, 0, is_off);
+}
+EXPORT_SYMBOL_GPL(pm_genpd_init_simple);
 
 #ifdef CONFIG_PM_GENERIC_DOMAINS_OF
 /*

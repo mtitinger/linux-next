@@ -215,7 +215,7 @@ static void __pmu_domain_register(struct pmu_domain *domain,
 	domain->base.power_off = pmu_domain_power_off;
 	domain->base.power_on = pmu_domain_power_on;
 
-	pm_genpd_init(&domain->base, NULL, !(val & domain->pwr_mask));
+	pm_genpd_init_simple(&domain->base, NULL, !(val & domain->pwr_mask));
 
 	if (np)
 		of_genpd_add_provider_simple(np, &domain->base);

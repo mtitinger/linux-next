@@ -299,7 +299,7 @@ static int rockchip_pm_add_one_domain(struct rockchip_pmu *pmu,
 	pd->genpd.attach_dev = rockchip_pd_attach_dev;
 	pd->genpd.detach_dev = rockchip_pd_detach_dev;
 	pd->genpd.flags = GENPD_FLAG_PM_CLK;
-	pm_genpd_init(&pd->genpd, NULL, false);
+	pm_genpd_init_simple(&pd->genpd, NULL, false);
 
 	pmu->genpd_data.domains[id] = &pd->genpd;
 	return 0;

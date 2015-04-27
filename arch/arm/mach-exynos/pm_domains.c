@@ -187,7 +187,7 @@ static __init int exynos4_pm_init_power_domain(void)
 no_clk:
 		on = __raw_readl(pd->base + 0x4) & INT_LOCAL_PWR_EN;
 
-		pm_genpd_init(&pd->pd, NULL, !on);
+		pm_genpd_init_simple(&pd->pd, NULL, !on);
 		of_genpd_add_provider_simple(np, &pd->pd);
 	}
 

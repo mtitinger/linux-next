@@ -316,11 +316,11 @@ int __init s3c64xx_pm_init(void)
 	s3c_pm_init();
 
 	for (i = 0; i < ARRAY_SIZE(s3c64xx_always_on_pm_domains); i++)
-		pm_genpd_init(&s3c64xx_always_on_pm_domains[i]->pd,
+		pm_genpd_init_simple(&s3c64xx_always_on_pm_domains[i]->pd,
 			      &pm_domain_always_on_gov, false);
 
 	for (i = 0; i < ARRAY_SIZE(s3c64xx_pm_domains); i++)
-		pm_genpd_init(&s3c64xx_pm_domains[i]->pd, NULL, false);
+		pm_genpd_init_simple(&s3c64xx_pm_domains[i]->pd, NULL, false);
 
 #ifdef CONFIG_S3C_DEV_FB
 	if (dev_get_platdata(&s3c_device_fb.dev))

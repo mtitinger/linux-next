@@ -443,7 +443,7 @@ static int __init scpsys_probe(struct platform_device *pdev)
 		 */
 		genpd->power_on(genpd);
 
-		pm_genpd_init(genpd, NULL, false);
+		pm_genpd_init_simple(genpd, NULL, false);
 	}
 
 	/*

@@ -196,7 +196,7 @@ static int gdsc_init(struct gdsc *sc)
 
 	sc->pd.power_off = gdsc_disable;
 	sc->pd.power_on = gdsc_enable;
-	pm_genpd_init(&sc->pd, NULL, !on);
+	pm_genpd_init_simple(&sc->pd, NULL, !on);
 
 	return 0;
 }
