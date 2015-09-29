@@ -60,6 +60,7 @@ struct generic_pm_domain {
 	struct work_struct power_off_work;
 	const char *name;
 	atomic_t sd_count;	/* Number of subdomains with power "on" */
+	atomic_t usage_count;	/* Number of active users of domain "on" */
 	enum gpd_status status;	/* Current state of the domain */
 	unsigned int device_count;	/* Number of devices */
 	unsigned int suspended_count;	/* System suspend device counter */

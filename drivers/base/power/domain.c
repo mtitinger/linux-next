@@ -192,6 +192,7 @@ static bool genpd_sd_counter_dec(struct generic_pm_domain *genpd)
 
 	if (!WARN_ON(atomic_read(&genpd->sd_count) == 0))
 		ret = !!atomic_dec_and_test(&genpd->sd_count);
+	atomic_dec(&genpd->usage_count);
 
 	return ret;
 }
@@ -199,6 +200,7 @@ static bool genpd_sd_counter_dec(struct generic_pm_domain *genpd)
 static void genpd_sd_counter_inc(struct generic_pm_domain *genpd)
 {
 	atomic_inc(&genpd->sd_count);
+	atomic_inc(&genpd->usage_count);
 	smp_mb__after_atomic();
 }
 
@@ -530,6 +532,8 @@ static int pm_genpd_runtime_suspend(struct device *dev)
 		return ret;
 	}
 
+	if (!atomic_dec_and_test(&genpd->usage_count))
+		return 0;
 	/*
 	 * If power.irq_safe is set, this routine will be run with interrupts
 	 * off, so it can't use mutexes.
@@ -563,6 +567,9 @@ static int pm_genpd_runtime_resume(struct device *dev)
 	genpd = dev_to_genpd(dev);
 	if (IS_ERR(genpd))
 		return -EINVAL;
+
+	if (atomic_inc_return(&genpd->usage_count) > 1)
+		goto out;
 
 	/* If power.irq_safe, the PM domain is never powered off. */
 	if (dev->power.irq_safe) {
@@ -1379,9 +1386,11 @@ int __pm_genpd_add_device(struct generic_pm_domain *genpd, struct device *dev,
 
 	if (ret)
 		genpd_free_dev_data(dev, gpd_data);
-	else
+	else {
 		dev_pm_qos_add_notifier(dev, &gpd_data->nb);
-
+		atomic_inc(&genpd->usage_count);
+		printk("Add device %d\n", atomic_read(&genpd->usage_count));
+	}
 	return ret;
 }
 
@@ -1424,6 +1433,7 @@ int pm_genpd_remove_device(struct generic_pm_domain *genpd,
 
 	genpd_unlock(genpd);
 
+	atomic_dec(&genpd->usage_count);
 	genpd_free_dev_data(dev, gpd_data);
 
 	return 0;
@@ -1641,6 +1651,7 @@ void pm_genpd_init(struct generic_pm_domain *genpd,
 	genpd->gov = gov;
 	INIT_WORK(&genpd->power_off_work, genpd_power_off_work_fn);
 	atomic_set(&genpd->sd_count, 0);
+	atomic_set(&genpd->usage_count, 0);
 	genpd->status = is_off ? GPD_STATE_POWER_OFF : GPD_STATE_ACTIVE;
 	genpd->device_count = 0;
 	genpd->max_off_time_ns = -1;
