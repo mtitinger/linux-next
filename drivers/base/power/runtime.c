@@ -13,6 +13,7 @@
 #include <linux/pm_wakeirq.h>
 #include <trace/events/rpm.h>
 #include "power.h"
+#include <linux/cpu.h>
 
 typedef int (*pm_callback_t)(struct device *);
 
@@ -575,6 +576,70 @@ static int rpm_suspend(struct device *dev, int rpmflags)
 		pm_runtime_cancel_pending(dev);
 	}
 	goto out;
+}
+
+void cpu_pm_runtime_suspend(void)
+{
+	int ret = 0;
+	int (*callback)(struct device *);
+	struct device *dev = get_cpu_device(smp_processor_id());
+
+	if (!dev)
+		return;
+
+	trace_rpm_suspend(dev, 0);
+
+	/**
+	 * Use device usage_count to disallow bubbling up suspend.
+	 * This CPU has already decided to suspend, we cannot
+	 * prevent it here.
+	 */
+	if (!atomic_dec_and_test(&dev->power.usage_count))
+		return;
+
+	__update_runtime_status(dev, RPM_SUSPENDING);
+
+	pm_runtime_cancel_pending(dev);
+	callback = RPM_GET_CALLBACK(dev, runtime_suspend);
+
+	if (callback)
+		ret = callback(dev);
+	if (!ret)
+		__update_runtime_status(dev, RPM_SUSPENDED);
+	else
+		__update_runtime_status(dev, RPM_ACTIVE);
+
+	trace_rpm_return_int(dev, _THIS_IP_, ret);
+}
+
+void cpu_pm_runtime_resume(void)
+{
+	int ret = 0;
+	int (*callback)(struct device *);
+	struct device *dev = get_cpu_device(smp_processor_id());
+
+	if (!dev)
+		return;
+
+	trace_rpm_resume(dev, 0);
+
+	if (dev->power.runtime_status == RPM_ACTIVE)
+		return;
+
+	atomic_inc(&dev->power.usage_count);
+
+	__update_runtime_status(dev, RPM_RESUMING);
+
+	callback = RPM_GET_CALLBACK(dev, runtime_resume);
+
+	if (callback)
+		ret = callback(dev);
+	if (!ret)
+		__update_runtime_status(dev, RPM_ACTIVE);
+	else
+		__update_runtime_status(dev, RPM_SUSPENDED);
+
+	trace_rpm_return_int(dev, _THIS_IP_, ret);
 }
 
 /**

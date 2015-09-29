@@ -31,6 +31,8 @@ static inline bool queue_pm_work(struct work_struct *work)
 	return queue_work(pm_wq, work);
 }
 
+extern void cpu_pm_runtime_suspend(void);
+extern void cpu_pm_runtime_resume(void);
 extern int pm_generic_runtime_suspend(struct device *dev);
 extern int pm_generic_runtime_resume(struct device *dev);
 extern int pm_runtime_force_suspend(struct device *dev);
@@ -273,5 +275,4 @@ static inline void pm_runtime_dont_use_autosuspend(struct device *dev)
 {
 	__pm_runtime_use_autosuspend(dev, false);
 }
-
 #endif
