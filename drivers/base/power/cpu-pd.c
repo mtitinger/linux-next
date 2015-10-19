@@ -130,6 +130,26 @@ static int of_pm_domain_attach_cpus(void)
 	return 0;
 }
 
+static int cpu_hotplug(struct notifier_block *nb,
+			unsigned long action, void *data)
+{
+	/* Execute CPU runtime PM on that CPU */
+	switch (action) {
+	case CPU_DYING:
+	case CPU_DYING_FROZEN:
+		cpu_pm_runtime_suspend();
+		break;
+	case CPU_STARTING:
+	case CPU_STARTING_FROZEN:
+		cpu_pm_runtime_resume();
+		break;
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
 /**
  * of_register_cpu_pm_domain() - Register the CPU PM domain with GenPD
  * framework
@@ -171,10 +191,13 @@ int of_register_cpu_pm_domain(struct device_node *dn,
 
 	/* Attach the CPUs to the CPU PM domain */
 	ret = of_pm_domain_attach_cpus();
-	if (ret)
+	if (ret) {
 		of_genpd_del_provider(dn);
+		return ret;
+	}
 
-	return ret;
+	hotcpu_notifier(cpu_hotplug, 0)
+	return 0;
 }
 EXPORT_SYMBOL(of_register_cpu_pm_domain);
 
