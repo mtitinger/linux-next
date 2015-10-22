@@ -21,6 +21,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
+#include <linux/ktime.h>
 
 #include <asm/cpuidle.h>
 
@@ -40,6 +41,7 @@ static int arm_enter_idle_state(struct cpuidle_device *dev,
 				struct cpuidle_driver *drv, int idx)
 {
 	int ret;
+	ktime_t st, end;
 
 	if (!idx) {
 		cpu_do_idle();
@@ -52,7 +54,10 @@ static int arm_enter_idle_state(struct cpuidle_device *dev,
 		 * Notify runtime PM as well of this cpu powering down
 		 * TODO: Merge CPU_PM and runtime PM.
 		 */
+		st = ktime_get();
 		RCU_NONIDLE(cpu_pm_runtime_suspend());
+		end = ktime_get();
+		trace_printk("Enter latency: %llu\n", ktime_to_ns(ktime_sub(end, st)));
 
 		/*
 		 * Pass idle state index to cpu_suspend which in turn will
