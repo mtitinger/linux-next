@@ -163,11 +163,13 @@
 		a57_pd: a57_pd@ {
 			compatible = "arm,cpu-pd";
 			#power-domain-cells = <0>;
+			domain-idle-states = <&CLUSTER_SLEEP_0>;
 		};
 
 		a53_pd: a53_pd@ {
 			compatible = "arm,cpu-pd";
 			#power-domain-cells = <0>;
+			domain-idle-states = <&CLUSTER_SLEEP_0>;
 		};
 	};
 
