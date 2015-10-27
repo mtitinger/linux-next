@@ -21,8 +21,6 @@
 #include <linux/rculist.h>
 #include <linux/slab.h>
 
-#define NAME_MAX 36
-
 /* List of CPU PM domains we care about */
 static LIST_HEAD(of_cpu_pd_list);
 static DEFINE_SPINLOCK(cpu_pd_list_lock);
