@@ -8,8 +8,6 @@
  * published by the Free Software Foundation.
  */
 
-#define DEBUG
-
 #include <linux/kernel.h>
 #include <linux/export.h>
 #include <linux/cpu.h>
@@ -160,8 +158,6 @@ static int cpu_hotplug(struct notifier_block *nb,
 int of_register_cpu_pm_domain(struct device_node *dn,
 		struct cpu_pm_domain *pd)
 {
-	int ret;
-
 	if (!pd || !pd->genpd)
 		return -EINVAL;
 
@@ -187,14 +183,6 @@ int of_register_cpu_pm_domain(struct device_node *dn,
 	pm_genpd_init_simple(pd->genpd, &simple_qos_governor, false);
 	of_genpd_add_provider_simple(dn, pd->genpd);
 
-	/* Attach the CPUs to the CPU PM domain */
-	ret = of_pm_domain_attach_cpus();
-	if (ret) {
-		of_genpd_del_provider(dn);
-		return ret;
-	}
-
-	hotcpu_notifier(cpu_hotplug, 0)
 	return 0;
 }
 EXPORT_SYMBOL(of_register_cpu_pm_domain);
@@ -245,21 +233,28 @@ int of_init_cpu_pm_domain(struct device_node *dn, struct cpu_pm_ops *ops)
 EXPORT_SYMBOL(of_init_cpu_pm_domain);
 
 
-static int __init of_cpu_pd_init(void)
+int __init of_cpu_pd_init(const char* compatible)
 {
 	struct device_node *dn;
 	int ret;
 
-	for_each_compatible_node(dn, NULL, "cpu,pd") {
+	if (!compatible)
+		return -EINVAL;
+
+	for_each_compatible_node(dn, NULL, compatible) {
 
 		if (!of_device_is_available(dn))
 			continue;
 
 		ret = of_init_cpu_pm_domain(dn, NULL);
-		if (!ret)
+		if (ret)
 			return ret;
 
 	}
-	return 0;
+
+	ret = of_pm_domain_attach_cpus();
+	if (!ret)
+		hotcpu_notifier(cpu_hotplug, 0);
+
+	return ret;
 }
-device_initcall(of_cpu_pd_init);

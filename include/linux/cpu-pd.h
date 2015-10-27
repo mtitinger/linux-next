@@ -32,4 +32,6 @@ extern int of_register_cpu_pm_domain(struct device_node *dn,
 extern int of_init_cpu_pm_domain(struct device_node *dn,
 		struct cpu_pm_ops *ops);
 
+extern int __init of_cpu_pd_init(const char* compatible);
+
 #endif /* __CPU_PD_H__ */
