@@ -11,6 +11,7 @@
 #ifndef __CPU_PD_H__
 #define __CPU_PD_H__
 
+#include <linux/cpumask.h>
 #include <linux/list.h>
 #include <linux/of.h>
 #include <linux/pm_domain.h>
@@ -26,6 +27,7 @@ struct cpu_pm_domain {
 	struct device_node *dn;
 	struct cpu_pd_ops plat_ops;
 	struct cpu_pm_domain *parent;
+	cpumask_var_t cpus;
 };
 
 int of_setup_cpu_pm_domains(const struct cpu_pd_ops *ops);

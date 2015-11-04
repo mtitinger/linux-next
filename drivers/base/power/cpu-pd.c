@@ -80,7 +80,7 @@ static void run_cpu(void *unused)
 	pm_runtime_get_noresume(cpu_dev);
 }
 
-static int of_pm_domain_attach_cpu(int cpu)
+static int of_pm_domain_attach_cpu(struct cpu_pm_domain *cpu_pd, int cpu)
 {
 	int ret;
 	struct device *cpu_dev;
@@ -117,6 +117,11 @@ static int of_pm_domain_attach_cpu(int cpu)
 		pm_runtime_enable(cpu_dev);
 		dev_dbg(cpu_dev, "Attached CPU%d to domain\n", cpu);
 	}
+
+	while (!ret && cpu_pd) {
+		cpumask_set_cpu(cpu, cpu_pd->cpus);
+		cpu_pd = cpu_pd->parent;
+	};
 
 	return ret;
 }
@@ -217,6 +222,9 @@ static struct generic_pm_domain *of_init_cpu_pm_domain(struct device_node *dn,
 
 	pd->genpd = genpd;
 
+	if (!zalloc_cpumask_var(&pd->cpus, GFP_KERNEL))
+		goto no_mem;
+
 	if (ops) {
 		pd->plat_ops.power_off = ops->power_off;
 		pd->plat_ops.power_on = ops->power_on;
@@ -231,6 +239,7 @@ no_mem:
 
 	kfree(pd->genpd->name);
 	kfree(pd->genpd);
+	kfree(pd->cpus);
 	kfree(pd);
 	return ERR_PTR(ret);
 }
@@ -329,7 +338,7 @@ int of_setup_cpu_pm_domains(const struct cpu_pd_ops *ops)
 			return -ENOENT;
 		}
 
-		ret = of_pm_domain_attach_cpu(cpu);
+		ret = of_pm_domain_attach_cpu(cpu_pd, cpu);
 		if (ret)
 			return ret;
 
