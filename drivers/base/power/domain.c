@@ -34,11 +34,8 @@
 	__ret;							\
 })
 
-#define GENPD_MAX_NAME_SIZE 20
-
-static int pm_genpd_alloc_states_names(struct generic_pm_domain *genpd,
-				       const struct genpd_power_state *st,
-				       unsigned int st_count);
+#define GENPD_MAX_NAME_SIZE 50
+#define GENPD_MAX_DOMAIN_STATES 10
 
 static LIST_HEAD(gpd_list);
 static DEFINE_MUTEX(gpd_list_lock);
@@ -108,7 +105,6 @@ static void genpd_sd_counter_inc(struct generic_pm_domain *genpd)
 
 static int genpd_power_on(struct generic_pm_domain *genpd, bool timed)
 {
-	unsigned int state_idx = genpd->state_idx;
 	ktime_t time_start;
 	s64 elapsed_ns;
 	int ret;
@@ -125,10 +121,10 @@ static int genpd_power_on(struct generic_pm_domain *genpd, bool timed)
 		return ret;
 
 	elapsed_ns = ktime_to_ns(ktime_sub(ktime_get(), time_start));
-	if (elapsed_ns <= genpd->states[state_idx].power_on_latency_ns)
+	if (elapsed_ns <= genpd->cur_state->power_on_latency_ns)
 		return ret;
 
-	genpd->states[state_idx].power_on_latency_ns = elapsed_ns;
+	genpd->cur_state->power_on_latency_ns = elapsed_ns;
 	genpd->max_off_time_changed = true;
 	pr_debug("%s: Power-%s latency exceeded, new value %lld ns\n",
 		 genpd->name, "on", elapsed_ns);
@@ -138,7 +134,6 @@ static int genpd_power_on(struct generic_pm_domain *genpd, bool timed)
 
 static int genpd_power_off(struct generic_pm_domain *genpd, bool timed)
 {
-	unsigned int state_idx = genpd->state_idx;
 	ktime_t time_start;
 	s64 elapsed_ns;
 	int ret;
@@ -155,10 +150,10 @@ static int genpd_power_off(struct generic_pm_domain *genpd, bool timed)
 		return ret;
 
 	elapsed_ns = ktime_to_ns(ktime_sub(ktime_get(), time_start));
-	if (elapsed_ns <= genpd->states[state_idx].power_off_latency_ns)
+	if (elapsed_ns <= genpd->cur_state->power_off_latency_ns)
 		return ret;
 
-	genpd->states[state_idx].power_off_latency_ns = elapsed_ns;
+	genpd->cur_state->power_off_latency_ns = elapsed_ns;
 	genpd->max_off_time_changed = true;
 	pr_debug("%s: Power-%s latency exceeded, new value %lld ns\n",
 		 genpd->name, "off", elapsed_ns);
@@ -591,7 +586,7 @@ static void pm_genpd_sync_poweroff(struct generic_pm_domain *genpd,
 		return;
 
 	/* Choose the deepest state when suspending */
-	genpd->state_idx = genpd->state_count - 1;
+	genpd->cur_state = genpd->states;
 	genpd_power_off(genpd, timed);
 
 	genpd->status = GPD_STATE_POWER_OFF;
@@ -1215,46 +1210,6 @@ static void genpd_free_dev_data(struct device *dev,
 	dev_pm_put_subsys_data(dev);
 }
 
-static int genpd_alloc_states_data(struct generic_pm_domain *genpd,
-				   const struct genpd_power_state *st,
-				   unsigned int st_count)
-{
-	int ret = 0;
-	unsigned int i;
-
-	if (IS_ERR_OR_NULL(genpd)) {
-		ret = -EINVAL;
-		goto err;
-	}
-
-	if (!st || (st_count < 1)) {
-		ret = -EINVAL;
-		goto err;
-	}
-
-	/* Allocate the local memory to keep the states for this genpd */
-	genpd->states = kcalloc(st_count, sizeof(*st), GFP_KERNEL);
-	if (!genpd->states) {
-		ret = -ENOMEM;
-		goto err;
-	}
-
-	for (i = 0; i < st_count; i++) {
-		genpd->states[i].power_on_latency_ns =
-			st[i].power_on_latency_ns;
-		genpd->states[i].power_off_latency_ns =
-			st[i].power_off_latency_ns;
-	}
-
-	genpd->state_count = st_count;
-
-	/* to save memory, Name allocation will happen if debug is enabled */
-	pm_genpd_alloc_states_names(genpd, st, st_count);
-
-err:
-	return ret;
-}
-
 /**
  * __pm_genpd_add_device - Add a device to an I/O PM domain.
  * @genpd: PM domain to add the device to.
@@ -1500,27 +1455,167 @@ static int pm_genpd_default_restore_state(struct device *dev)
 	return cb ? cb(dev) : 0;
 }
 
+/*
+ * state depth comparison function.
+ */
+static int state_cmp(const void *a, const void *b)
+{
+	struct genpd_power_state *state_a = (struct genpd_power_state *)(a);
+	struct genpd_power_state *state_b = (struct genpd_power_state *)(b);
+
+	s64 depth_a = GENPD_STATE_LATENCY(state_a);
+	s64 depth_b = GENPD_STATE_LATENCY(state_b);
+
+	return (depth_a > depth_b) ? 0 : -1;
+}
+
+static inline void genpd_insert_state(struct generic_pm_domain *genpd,
+		       struct genpd_power_state *new_state)
+{
+	struct genpd_power_state **cur = &(genpd->states);
+
+	while(*cur) {
+		/*
+		 * If the new state is deeper than the current,
+		 * chaine the current after the new one.
+		 */
+		if (state_cmp(*cur, new_state) < 0) {
+			new_state->next = *cur;
+			(*cur) = new_state;
+			return;
+		}
+		cur = &(*cur)->next;
+	}
+	*cur = new_state;
+}
+
+static int of_get_genpd_power_state(struct genpd_power_state *genpd_state,
+				    struct device_node *state_node)
+{
+	int err = 0;
+	u32 residency, param, entry_latency, exit_latency;
+
+	err = of_property_read_u32(state_node, "entry-latency-us",
+				   &entry_latency);
+	if (err) {
+		pr_debug(" * %s missing entry-latency-us property\n",
+			 state_node->full_name);
+		return -EINVAL;
+	}
+	genpd_state->power_off_latency_ns = 1000 * entry_latency;
+
+	err = of_property_read_u32(state_node, "exit-latency-us",
+				   &exit_latency);
+	if (err) {
+		pr_debug(" * %s missing exit-latency-us property\n",
+			 state_node->full_name);
+		return -EINVAL;
+	}
+	genpd_state->power_on_latency_ns = 1000 * exit_latency;
+
+	err = of_property_read_u32(state_node, "residency-us", &residency);
+	if (!err)
+		genpd_state->residency_ns = 1000 * residency;
+
+	err = of_property_read_u32(state_node, "residency-us", &residency);
+	if (!err)
+		genpd_state->residency_ns = 1000 * residency;
+
+	err = of_property_read_u32(state_node, "state-param", &param);
+	if (!err)
+		genpd_state->param = param;
+
+#ifdef CONFIG_PM_ADVANCED_DEBUG
+        /* to save memory, Name allocation will happen if debug is enabled */
+
+        genpd_state->name = kstrndup(state_node->full_name,
+                        GENPD_MAX_NAME_SIZE,
+                        GFP_KERNEL);
+
+        if (!genpd_state->name) {
+                pr_err("Failed to allocate state '%s' name.\n",
+			state_node->full_name);
+                return -ENOMEM;
+        }
+#endif
+
+	return 0;
+}
+
+
+
+static int of_genpd_parse_domain_states(struct generic_pm_domain *genpd)
+{
+	struct device_node *state_node;
+	struct device_node *pdn;
+	struct genpd_power_state *new_state;
+	int i, err =0;
+        /*
+         *  Check if any states are listed in the DTB for the PD
+         */
+        pdn = of_find_node_by_name(of_root, genpd->name);
+	if (IS_ERR(pdn))
+		return PTR_ERR(pdn);
+
+	if (pdn)
+	for (i = 0;; i++) {
+		state_node = of_parse_phandle(pdn, "domain-power-states", i);
+		if (!state_node)
+			break;
+
+		/* we can allocate a new state, and fill it out */
+		new_state = kcalloc(1, sizeof(*new_state), GFP_KERNEL);
+		if (!new_state) {
+			of_node_put(state_node);
+			return -ENOMEM;
+		}
+
+		err = of_get_genpd_power_state(new_state, state_node);
+		if (err) {
+			pr_err
+			    ("Parsing idle state node %s failed with err %d\n",
+			     state_node->full_name, err);
+			kfree(new_state);
+		}
+
+		of_node_put(state_node);
+
+		if (err)
+			return err;
+
+		genpd_insert_state(genpd, new_state);
+	}
+
+        /*
+         * Allocate the default state if genpd states
+         * are not already defined.
+         */
+        if (!genpd->states) {
+                new_state = kcalloc(1, sizeof(*new_state), GFP_KERNEL);
+                if (!new_state) {
+                        pr_err
+                            ("Failed to allocate memory for default state of %s\n",
+                             genpd->name);
+                        return -ENOMEM;
+                }
+
+                new_state->name = "OFF";
+
+                genpd_insert_state(genpd, new_state);
+        }
+
+	return 0;
+}
+
 /**
- * pm_genpd_init - Initialize a generic I/O PM domain object.
+ * _genpd_init - Initialize a generic I/O PM domain object.
  * @genpd: PM domain object to initialize.
  * @gov: PM domain governor to associate with the domain (may be NULL).
  * @is_off: Initial value of the domain's power_is_off field.
  */
-void pm_genpd_init(struct generic_pm_domain *genpd,
-		   struct dev_power_governor *gov, bool is_off)
+int _genpd_init(struct generic_pm_domain *genpd,
+	   struct dev_power_governor *gov, bool is_off)
 {
-	int ret;
-	static const struct genpd_power_state genpd_default_off[] = {
-		{
-			.name = "OFF",
-			.power_off_latency_ns = 0,
-			.power_on_latency_ns = 0,
-		},
-	};
-
-	if (IS_ERR_OR_NULL(genpd))
-		return;
-
 	INIT_LIST_HEAD(&genpd->master_links);
 	INIT_LIST_HEAD(&genpd->slave_links);
 	INIT_LIST_HEAD(&genpd->dev_list);
@@ -1562,22 +1657,37 @@ void pm_genpd_init(struct generic_pm_domain *genpd,
 		genpd->dev_ops.start = pm_clk_resume;
 	}
 
-	/*
-	 * Allocate the default state if genpd states
-	 * are not already defined.
-	 */
-	if (!genpd->state_count) {
-		ret = genpd_alloc_states_data(genpd, genpd_default_off, 1);
-		if (ret)
-			return;
-	}
+	return 0;
+}
 
-	/* Assume the deepest state on init*/
-	genpd->state_idx = genpd->state_count - 1;
+int pm_genpd_init(struct generic_pm_domain *genpd,
+		   struct dev_power_governor *gov, bool is_off)
+{
+	int ret;
 
-	mutex_lock(&gpd_list_lock);
-	list_add(&genpd->gpd_list_node, &gpd_list);
-	mutex_unlock(&gpd_list_lock);
+	if (IS_ERR_OR_NULL(genpd))
+		return -EINVAL;
+
+	ret = _genpd_init(genpd, gov, is_off);
+        if (ret) {
+                pr_err("Error initializing genpd %s\n", genpd->name);
+                return ret;
+        }
+
+        ret = of_genpd_parse_domain_states(genpd);
+        if (ret) {
+                pr_err("Error parsing genpd states for %s\n", genpd->name);
+                return ret;
+        }
+
+        /* Assume the deepest state on init*/
+        genpd->cur_state = genpd->states;
+
+        mutex_lock(&gpd_list_lock);
+        list_add(&genpd->gpd_list_node, &gpd_list);
+        mutex_unlock(&gpd_list_lock);
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(pm_genpd_init);
 
@@ -1894,33 +2004,6 @@ EXPORT_SYMBOL_GPL(genpd_dev_pm_attach);
 #include <linux/kobject.h>
 static struct dentry *pm_genpd_debugfs_dir;
 
-static int pm_genpd_alloc_states_names(struct generic_pm_domain *genpd,
-				       const struct genpd_power_state *st,
-				       unsigned int st_count)
-{
-	unsigned int i;
-
-	if (IS_ERR_OR_NULL(genpd))
-		return -EINVAL;
-
-	if (genpd->state_count != st_count) {
-		pr_err("Invalid allocated state count\n");
-		return -EINVAL;
-	}
-
-	for (i = 0; i < st_count; i++) {
-		genpd->states[i].name = kstrndup(st[i].name,
-				GENPD_MAX_NAME_SIZE, GFP_KERNEL);
-		if (!genpd->states[i].name) {
-			pr_err("%s Failed to allocate state %d name.\n",
-				genpd->name, i);
-			return -ENOMEM;
-		}
-	}
-
-	return 0;
-}
-
 /*
  * TODO: This function is a slightly modified version of rtpm_status_show
  * from sysfs.c, so generalize it.
@@ -1954,7 +2037,6 @@ static int pm_genpd_summary_one(struct seq_file *s,
 		[GPD_STATE_ACTIVE] = "on",
 		[GPD_STATE_POWER_OFF] = "off"
 	};
-	unsigned int state_idx = genpd->state_idx;
 	struct pm_domain_data *pm_data;
 	const char *kobj_path;
 	struct gpd_link *link;
@@ -1969,7 +2051,7 @@ static int pm_genpd_summary_one(struct seq_file *s,
 
 	seq_printf(s, "%-30s  %-15s  ", genpd->name,
 		   (genpd->status == GPD_STATE_POWER_OFF) ?
-		   genpd->states[state_idx].name :
+		   genpd->cur_state->name :
 		   status_lookup[genpd->status]);
 
 	/*

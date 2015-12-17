@@ -99,7 +99,7 @@ static bool default_stop_ok(struct device *dev)
  * This routine must be executed under the PM domain's lock.
  */
 static bool power_down_ok_for_state(struct dev_pm_domain *pd,
-				     unsigned int state)
+				    struct genpd_power_state *pos)
 {
 	struct generic_pm_domain *genpd = pd_to_genpd(pd);
 	struct gpd_link *link;
@@ -107,9 +107,7 @@ static bool power_down_ok_for_state(struct dev_pm_domain *pd,
 	s64 min_off_time_ns;
 	s64 off_on_time_ns;
 
-	off_on_time_ns = genpd->states[state].power_off_latency_ns +
-		genpd->states[state].power_on_latency_ns;
-
+	off_on_time_ns = GENPD_STATE_LATENCY(pos);
 
 	min_off_time_ns = -1;
 	/*
@@ -185,18 +183,16 @@ static bool power_down_ok_for_state(struct dev_pm_domain *pd,
 	 * time and the time needed to turn the domain on is the maximum
 	 * theoretical time this domain can spend in the "off" state.
 	 */
-	genpd->max_off_time_ns = min_off_time_ns -
-			genpd->states[state].power_on_latency_ns;
+	genpd->max_off_time_ns = min_off_time_ns - pos->power_on_latency_ns;
 	return true;
 }
 
 static bool default_power_down_ok(struct dev_pm_domain *pd)
 {
 	struct generic_pm_domain *genpd = pd_to_genpd(pd);
-	unsigned int last_state_idx = genpd->state_count - 1;
+	struct genpd_power_state *pos;
 	struct gpd_link *link;
 	bool retval = false;
-	unsigned int i;
 
 	/*
 	 * if there was no change on max_off_time, we can return the
@@ -218,12 +214,14 @@ static bool default_power_down_ok(struct dev_pm_domain *pd)
 	genpd->max_off_time_changed = false;
 
 	/* find a state to power down to, starting from the deepest */
-	for (i = 0; i < genpd->state_count; i++) {
-		if (power_down_ok_for_state(pd, last_state_idx - i)) {
-			genpd->state_idx = last_state_idx - i;
+	pos = genpd->states;
+	while (pos) {
+		if (power_down_ok_for_state(pd, pos)) {
+			genpd->cur_state = pos;
 			retval = true;
 			break;
 		}
+		pos = pos->next;
 	}
 
 	genpd->cached_power_down_ok = retval;

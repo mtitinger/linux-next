@@ -37,10 +37,18 @@ struct gpd_dev_ops {
 	bool (*active_wakeup)(struct device *dev);
 };
 
+#define GENPD_STATE_LATENCY(pos) \
+                ((pos)->power_off_latency_ns + \
+                 (pos)->power_on_latency_ns + \
+                 (pos)->residency_ns)
+
 struct genpd_power_state {
+	struct genpd_power_state *next;
 	char *name;
 	s64 power_off_latency_ns;
 	s64 power_on_latency_ns;
+	s64 residency_ns;
+	u32 param;
 };
 
 struct generic_pm_domain {
@@ -70,10 +78,9 @@ struct generic_pm_domain {
 	void (*detach_dev)(struct generic_pm_domain *domain,
 			   struct device *dev);
 	unsigned int flags;		/* Bit field of configs for genpd */
-	struct genpd_power_state *states;
-	unsigned int state_count; /* number of states */
-	unsigned int state_idx; /* state that genpd will go to when off */
 
+	struct genpd_power_state *states;
+	struct genpd_power_state *cur_state;
 };
 
 static inline struct generic_pm_domain *pd_to_genpd(struct dev_pm_domain *pd)
@@ -129,7 +136,7 @@ extern int pm_genpd_add_subdomain(struct generic_pm_domain *genpd,
 				  struct generic_pm_domain *new_subdomain);
 extern int pm_genpd_remove_subdomain(struct generic_pm_domain *genpd,
 				     struct generic_pm_domain *target);
-extern void pm_genpd_init(struct generic_pm_domain *genpd,
+extern int pm_genpd_init(struct generic_pm_domain *genpd,
 			  struct dev_power_governor *gov, bool is_off);
 
 extern struct dev_power_governor simple_qos_governor;
@@ -165,7 +172,7 @@ static inline int pm_genpd_remove_subdomain(struct generic_pm_domain *genpd,
 {
 	return -ENOSYS;
 }
-static inline void pm_genpd_init(struct generic_pm_domain *genpd,
+static inline int pm_genpd_init(struct generic_pm_domain *genpd,
 				 struct dev_power_governor *gov, bool is_off)
 {
 }
@@ -211,6 +218,8 @@ struct generic_pm_domain *__of_genpd_xlate_onecell(
 					void *data);
 
 int genpd_dev_pm_attach(struct device *dev);
+int of_pm_genpd_init(struct device_node *dn, struct generic_pm_domain *genpd,
+		   struct dev_power_governor *gov, bool is_off);
 #else /* !CONFIG_PM_GENERIC_DOMAINS_OF */
 static inline int __of_genpd_add_provider(struct device_node *np,
 					genpd_xlate_t xlate, void *data)
@@ -229,6 +238,13 @@ static inline struct generic_pm_domain *of_genpd_get_from_provider(
 #define __of_genpd_xlate_onecell	NULL
 
 static inline int genpd_dev_pm_attach(struct device *dev)
+{
+	return -ENODEV;
+}
+
+static inline int of_pm_genpd_init(struct device_node *dn,
+		struct generic_pm_domain *genpd,
+		struct dev_power_governor *gov, bool is_off)
 {
 	return -ENODEV;
 }

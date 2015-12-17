@@ -29,6 +29,41 @@ Optional properties:
    specified by this binding. More details about power domain specifier are
    available in the next section.
 
+- domain-power-states : A phandle of a possible power-state of a
+  generic domain.
+
+==Power state==
+
+A PM domain power state describes an idle state of a domain and must have
+the following properties:
+
+	- entry-latency-us
+		Usage: Required.
+		Value type: <prop-encoded-array>
+		Definition: u32 value representing worst case latency in
+		microseconds required to enter the idle state.
+		The exit-latency-us duration may be guaranteed
+		only after entry-latency-us has passed.
+
+	- exit-latency-us
+		Usage: Required.
+		Value type: <prop-encoded-array>
+		Definition: u32 value representing worst case latency
+		in microseconds required to exit the idle state.
+
+	- residency-us:
+		Usage: Optional
+		Value type: <prop-encoded-array>
+		Definition: A u32 value representing the time for which a
+		domain must be idle in the state to reap power saving benefits
+		of entering the state.
+
+	- state-param:
+		Usage: Optional
+		Value type: <prop-encoded-array>
+		Definition: A u32 value as defined by the state. May be used
+		by the driver to hold state related u32 data.
+
 Example:
 
 	power: power-controller@12340000 {
@@ -53,6 +88,15 @@ Example 2:
 		reg = <0x12341000 0x1000>;
 		power-domains = <&parent 0>;
 		#power-domain-cells = <1>;
+	};
+
+Example 3:
+
+        parent: power-controller@12340000 {
+                compatible = "foo,power-controller";
+                reg = <0x12340000 0x1000>;
+                #power-domain-cells = <1>;
+		domain-power-states = <&CLUSTER_SLEEP_0>;
 	};
 
 The nodes above define two power controllers: 'parent' and 'child'.
